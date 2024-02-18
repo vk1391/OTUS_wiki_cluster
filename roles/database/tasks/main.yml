@@ -1,0 +1,234 @@
+- name: yum update
+  command: "{{ item }}"
+  with_items: 
+    - yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+    - yum -y install http://mirror.centos.org/centos/7/extras/x86_64/Packages/centos-release-scl-rh-2-3.el7.centos.noarch.rpm
+    - yum -y install http://mirror.centos.org/centos/7/extras/x86_64/Packages/centos-release-scl-2-3.el7.centos.noarch.rpm
+    - yum -y install http://mirror.centos.org/centos/7/sclo/x86_64/rh/Packages/l/llvm-toolset-7-clang-4.0.1-1.el7.x86_64.rpm
+    - yum -y install https://rpmfind.net/linux/centos/8-stream/BaseOS/x86_64/os/Packages/libzstd-1.4.4-1.el8.x86_64.rpm
+  # register: err
+  # until: err.rc == 0
+  ignore_errors: true
+- name: Install components for building
+  command: yum install -y epel-release llvm-toolset-7-clang
+  ignore_errors: true
+- name: Install postgres
+  command: yum install -y postgresql14 postgresql14-server postgresql14-devel 
+  ignore_errors: true
+- name: Install python
+  command: yum -y install python3 python3-devel python3-pip gcc
+  ignore_errors: true
+- name: simlink psql
+  shell: sudo ln -s /usr/pgsql-14/bin/* /usr/sbin/
+- name: continue install 
+  command: "{{ item }}"
+  with_items: 
+    - pip3 install --upgrade testresources
+    - pip3 install --upgrade setuptools
+    - pip3 install psycopg2
+  ignore_errors: true
+- name: Install patroni
+  command: yum install -y etcd python3-etcd patroni patroni-etcd watchdog
+- name: create directory
+  command: "{{ item }}"
+  with_items: 
+    - mkdir -p /etc/patroni
+- name: stop firewall
+  systemd:
+    name: firewalld
+    state: stopped
+- name: add firewall consul tcp rules
+  copy:
+    content: |
+      <?xml version="1.0" encoding="utf-8"?>
+      <service>      
+      <short>consul</short>
+      <description>Firewall rule for consul port</description>
+      <port protocol="tcp" port="8300"/>
+      <port protocol="tcp" port="8301"/>
+      <port protocol="tcp" port="8302"/>
+      <port protocol="tcp" port="8500"/>
+      <port protocol="tcp" port="8600"/>
+      <port protocol="tcp" port="2379"/>
+      <port protocol="tcp" port="2380"/>
+      <port protocol="tcp" port="5432"/>
+      <port protocol="tcp" port="8008"/>
+      </service>
+    dest: /etc/firewalld/services/consultcp.xml
+- name: add firewall consul tcp rules
+  copy:
+    content: |
+      <?xml version="1.0" encoding="utf-8"?>
+      <service>      
+      <short>consul</short>
+      <description>Firewall rule for consul port</description>
+      <port protocol="udp" port="8301"/>
+      <port protocol="udp" port="8302"/>
+      <port protocol="udp" port="8600"/>
+      </service>
+    dest: /etc/firewalld/services/consuludp.xml
+- name: restart firewalld
+  systemd:
+    name: firewalld
+    state: restarted
+- name: Configuring firewall services
+  firewalld:
+    service: consuludp
+    permanent: yes
+    state: enabled
+    immediate: yes
+- name: Configuring firewall services
+  firewalld:
+    service: consultcp
+    permanent: yes
+    state: enabled
+    immediate: yes
+- name: set hostname
+  command: hostnamectl set-hostname {{ hostname }}
+- name: sync time
+  command: "{{ item }}"
+  with_items: 
+    - timedatectl set-timezone Europe/Moscow
+    - yum install chrony unzip wget -y
+    - systemctl enable chronyd --now
+- name: download consul
+  shell: wget -P /home/ https://hashicorp-releases.yandexcloud.net/consul/1.17.2/consul_1.17.2_linux_amd64.zip --no-check-certificate
+  ignore_errors: true
+- name: unzip consul
+  unarchive:
+    src: /home/consul_1.17.2_linux_amd64.zip
+    dest: /usr/bin/
+    remote_src: yes
+- name: modify /etc/hosts
+  copy:
+    content: |
+      127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+      ::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+      127.0.1.1 {{ post_name }} {{ post_name }}
+      192.168.56.202 consul1 {{ hostvars.consul1.hostname }}
+      192.168.56.203 consul2 {{ hostvars.consul2.hostname }}
+      192.168.56.204 consul3 {{ hostvars.consul3.hostname }}
+      192.168.56.209 backend1 {{ hostvars.backend1.hostname }}
+      192.168.56.210 backend2 {{ hostvars.backend2.hostname }}
+      192.168.56.205 postgres1 {{ hostvars.host1.hostname }}
+      192.168.56.206 postgres2 {{ hostvars.host2.hostname }}
+      192.168.56.207 postgres3 {{ hostvars.host3.hostname }}
+      192.168.56.208 haproxy_postgres {{ hostvars.haproxy_postgres.hostname }}
+      192.168.56.198 gluster gluster.otus.test
+      192.168.56.199 gluster1 {{ hostvars.gluster1.hostname }}
+      192.168.56.200 gluster2 {{ hostvars.gluster2.hostname }}
+      192.168.56.201 gluster3 {{ hostvars.gluster3.hostname }}
+    dest: /etc/hosts
+- name: create user and dir
+  command: "{{ item }}"
+  with_items: 
+    - useradd -r -c 'Consul DCS service' consul
+    - mkdir -p /var/lib/consul /etc/consul.d
+    - chown consul:consul /var/lib/consul /etc/consul.d
+    - chmod 775 /var/lib/consul /etc/consul.d
+  ignore_errors: true
+- name: config consul
+  copy: 
+    content: |
+      {
+          "bind_addr": "{{ node_ip }}",
+          "datacenter": "dc1",
+          "data_dir": "/var/lib/consul",
+          "domain": "consul",
+          "enable_script_checks": true,
+          "dns_config": {
+              "enable_truncate": true,
+              "only_passing": true
+          },
+          "enable_syslog": true,
+          "encrypt": "{{ consul_key }}",
+          "leave_on_terminate": true,
+          "log_level": "DEBUG",
+          "rejoin_after_leave": true,
+          "retry_join": [
+              "consul1.otus.test",
+              "consul2.otus.test",
+              "consul3.otus.test"
+          ],
+          "server": false,
+          "ui_config": {
+              "enabled": true
+          },
+          "ports": {
+              "grpc_tls":8502,
+              "http":8500
+              },
+          "tls": {
+              "defaults": {
+                  "ca_file": "/etc/consul.d/certs/consul-agent-ca.pem",
+                  "cert_file": "/etc/consul.d/certs/dc1-server-consul-0.pem",
+                  "key_file": "/etc/consul.d/certs/dc1-server-consul-0-key.pem",
+                  "verify_incoming": true,
+                  "verify_outgoing": true,
+                  "verify_server_hostname": true
+              },
+          }
+      }     
+    dest: /etc/consul.d/config.json
+- name: config svc
+  copy:
+    content: |
+      {
+          "service": {
+              "id": "postgres",
+              "name": "postgres",
+              "tags": [ "postgres" ],
+              "port": 5432,
+              "enable_tag_override": false,
+              "check": {
+                  "id": "psql_up",
+                  "name": "psql healthcheck",
+                  "tcp": "{{ node_ip }}:5432",
+                  "interval": "10s",
+                  "timeout": "2s"
+              }
+          }
+      }
+    dest: /etc/consul.d/postgres.json
+- name: create cert dir
+  file:
+    path: /etc/consul.d/certs
+    state: directory
+    owner: consul
+    group: consul
+- name: copy keys
+  copy:
+    src: ./certs/consul1/home/vagrant/
+    dest: /etc/consul.d/certs/
+    owner: consul
+    group: consul
+- name: create systemd unit
+  copy:
+    content: |
+      [Unit]
+      Description=Consul Service Discovery Agent
+      Documentation=https://www.consul.io/
+      After=network-online.target
+      Wants=network-online.target
+      
+      [Service]
+      Type=simple
+      User=consul
+      Group=consul
+      ExecStart=/usr/bin/consul agent \
+          -node={{ hostname }} \
+          -config-dir=/etc/consul.d
+      ExecReload=/bin/kill -HUP $MAINPID
+      KillSignal=SIGINT
+      TimeoutStopSec=5
+      Restart=on-failure
+      SyslogIdentifier=consul
+      
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/consul.service
+- name: start consul
+  systemd:
+    name: consul
+    state: started
+    enabled: true

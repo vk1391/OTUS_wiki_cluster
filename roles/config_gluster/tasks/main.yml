@@ -1,0 +1,17 @@
+- name: add nodes to gluster
+  command: '{{ item }}'
+  with_items: 
+    - gluster peer probe gluster1
+    - gluster peer probe gluster2
+    - gluster peer probe gluster3
+- name: create volume
+  command: gluster volume create share replica 3 transport tcp gluster1:/mnt/sdb/share/ gluster2:/mnt/sdb/share/ gluster3:/mnt/sdb/share/ force
+- name: start volume
+  command: gluster volume start share
+- name: config gluster
+  command: '{{ item }}'
+  with_items: 
+    - gluster volume set share network.ping-timeout 5
+    - gluster volume set share cluster.quorum-type fixed
+    - gluster volume set share cluster.quorum-count 1
+    - gluster volume set share performance.quick-read on

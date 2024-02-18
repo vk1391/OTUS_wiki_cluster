@@ -1,0 +1,5 @@
+consul_name: consul2
+retry_join_consul: ["consul1","consul3"]
+consul_ip: 192.168.56.203
+hostname: consul2.otus.test
+log_path: /var/log/messages

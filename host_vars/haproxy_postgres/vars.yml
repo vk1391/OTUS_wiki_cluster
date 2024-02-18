@@ -1,0 +1,4 @@
+haproxy_name: haproxy_postgres
+hostname: haproxy_postgres.otus.test
+haproxy_postgres_ip: 192.168.56.208
+log_path: /var/log/messages

@@ -1,0 +1,212 @@
+- name: stop firewall
+  systemd:
+    name: firewalld
+    state: stopped
+- name: add firewall consul tcp rules
+  copy:
+    content: |
+      <?xml version="1.0" encoding="utf-8"?>
+      <service>      
+      <short>consul</short>
+      <description>Firewall rule for consul port</description>
+      <port protocol="tcp" port="8300"/>
+      <port protocol="tcp" port="8301"/>
+      <port protocol="tcp" port="8302"/>
+      <port protocol="tcp" port="8500"/>
+      <port protocol="tcp" port="8600"/>
+      <port protocol="tcp" port="9107"/>
+      </service>
+    dest: /etc/firewalld/services/consultcp.xml
+- name: add firewall consul tcp rules
+  copy:
+    content: |
+      <?xml version="1.0" encoding="utf-8"?>
+      <service>      
+      <short>consul</short>
+      <description>Firewall rule for consul port</description>
+      <port protocol="udp" port="8301"/>
+      <port protocol="udp" port="8302"/>
+      <port protocol="udp" port="8600"/>
+      </service>
+    dest: /etc/firewalld/services/consuludp.xml
+- name: restart firewalld
+  systemd:
+    name: firewalld
+    state: restarted
+- name: Configuring firewall services
+  firewalld:
+    service: consuludp
+    permanent: yes
+    state: enabled
+    immediate: yes
+- name: Configuring firewall services
+  firewalld:
+    service: consultcp
+    permanent: yes
+    state: enabled
+    immediate: yes
+- name: set hostname
+  command: hostnamectl set-hostname {{ hostname }}
+- name: sync time
+  command: "{{ item }}"
+  with_items: 
+    - timedatectl set-timezone Europe/Moscow
+    - yum install chrony unzip wget -y
+    - systemctl enable chronyd --now
+- name: download consul
+  shell: wget -P /home/ https://hashicorp-releases.yandexcloud.net/consul/1.17.2/consul_1.17.2_linux_amd64.zip --no-check-certificate
+  ignore_errors: true
+- name: unzip consul
+  unarchive:
+    src: /home/consul_1.17.2_linux_amd64.zip
+    dest: /usr/bin/
+    remote_src: yes
+- name: modify /etc/hosts
+  copy:
+    content: |
+      127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+      ::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+      127.0.1.1 {{ consul_name }} {{ consul_name }}
+      192.168.56.202 consul1 {{ hostvars.consul1.hostname }}
+      192.168.56.203 consul2 {{ hostvars.consul2.hostname }}
+      192.168.56.204 consul3 {{ hostvars.consul3.hostname }}
+      192.168.56.209 backend1 {{ hostvars.backend1.hostname }}
+      192.168.56.210 backend2 {{ hostvars.backend2.hostname }}
+      192.168.56.205 postgres1 {{ hostvars.host1.hostname }}
+      192.168.56.206 postgres2 {{ hostvars.host2.hostname }}
+      192.168.56.207 postgres3 {{ hostvars.host3.hostname }}
+      192.168.56.208 haproxy_postgres {{ hostvars.haproxy_postgres.hostname }}
+      192.168.56.198 gluster gluster.otus.test
+      192.168.56.199 gluster1 {{ hostvars.gluster1.hostname }}
+      192.168.56.200 gluster2 {{ hostvars.gluster2.hostname }}
+      192.168.56.201 gluster3 {{ hostvars.gluster3.hostname }}
+    dest: /etc/hosts
+- name: create user and dir
+  command: "{{ item }}"
+  with_items: 
+    - useradd -r -c 'Consul DCS service' consul
+    - mkdir -p /var/lib/consul /etc/consul.d
+    - chown consul:consul /var/lib/consul /etc/consul.d
+    - chmod 775 /var/lib/consul /etc/consul.d
+  ignore_errors: true
+# - name: generate key
+#   command: consul keygen
+#   register: server_key
+- name: create CA
+  command: consul tls ca create
+  ignore_errors: true
+- name: create tls cert
+  command: consul tls cert create -server -dc dc1 -domain consul
+  ignore_errors: true
+- name: create clients cert
+  command: consul tls cert create -client -dc dc1
+  ignore_errors: true
+- name: config consul
+  copy: 
+    content: |
+      {
+          "bind_addr": "{{ consul_ip }}",
+          "bootstrap_expect": 3,
+          "client_addr": "0.0.0.0",
+          "datacenter": "dc1",
+          "data_dir": "/var/lib/consul",
+          "domain": "consul",
+          "enable_script_checks": true,
+          "dns_config": {
+              "enable_truncate": true,
+              "only_passing": true
+          },
+          "enable_syslog": true,
+          "encrypt": "{{ consul_key }}",
+          "leave_on_terminate": true,
+          "log_level": "DEBUG",
+          "rejoin_after_leave": true,
+          "retry_join": [
+              "consul1.otus.test",
+              "consul2.otus.test",
+              "consul3.otus.test"
+          ],
+          "server": true,
+          "ui_config": {
+              "enabled": true
+          },
+          "ports": {
+              "grpc_tls":8502,
+              "http":8500
+              },
+          "tls": {
+              "defaults": {
+                  "ca_file": "/etc/consul.d/certs/consul-agent-ca.pem",
+                  "cert_file": "/etc/consul.d/certs/dc1-server-consul-0.pem",
+                  "key_file": "/etc/consul.d/certs/dc1-server-consul-0-key.pem",
+                  "verify_incoming": true,
+                  "verify_outgoing": true,
+                  "verify_server_hostname": true
+              },
+          }
+      }     
+    dest: /etc/consul.d/config.json
+
+- name: register keys
+  shell: ls -al /home/vagrant/ | awk '{print $9}' | sed -n '10,50p'
+  register: keys
+- name: copy keys to another hosts
+  fetch:
+    src: /home/vagrant/{{ item }}
+    dest: ./certs/
+  with_items: 
+    - '{{ keys.stdout_lines }}'
+- name: create cert dir
+  file:
+    path: /etc/consul.d/certs
+    state: directory
+    owner: consul
+    group: consul
+- name: copy keys
+  copy:
+    src: ./certs/consul1/home/vagrant/
+    dest: /etc/consul.d/certs/
+    owner: consul
+    group: consul
+- name: create systemd unit
+  copy:
+    content: |
+      [Unit]
+      Description=Consul Service Discovery Agent
+      Documentation=https://www.consul.io/
+      After=network-online.target
+      Wants=network-online.target
+      
+      [Service]
+      Type=simple
+      User=consul
+      Group=consul
+      ExecStart=/usr/bin/consul agent \
+          -node={{ hostname }} \
+          -config-dir=/etc/consul.d
+      ExecReload=/bin/kill -HUP $MAINPID
+      KillSignal=SIGINT
+      TimeoutStopSec=5
+      Restart=on-failure
+      SyslogIdentifier=consul
+      
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/consul.service
+- name: start consul
+  systemd:
+    name: consul
+    state: started
+    enabled: true
+- name: install some packets for consul exporter
+  command: '{{ item }}'
+  with_items: 
+    - yum install wget git -y
+    - wget https://go.dev/dl/go1.21.1.linux-amd64.tar.gz
+    - sudo tar -C /usr/local -xzf go*.linux-amd64.tar.gz
+    - export PATH=$PATH:/usr/local/go/bin
+    - git clone https://github.com/prometheus/consul_exporter.git
+    - make -C consul-exporter/
+- name: start consul exporter
+  command: bash consul_exporter/consul_exporter --web.listen-address=:9107
+  

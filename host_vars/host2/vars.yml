@@ -1,0 +1,5 @@
+node_name: "etcd2"
+post_name: postgres2
+node_ip: "192.168.56.206"
+hostname: postgres2.otus.test
+log_path: /var/log/messages

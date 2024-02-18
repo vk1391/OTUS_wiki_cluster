@@ -1,0 +1,68 @@
+---
+- name: deploy consul
+  hosts: consul_srv
+  become: true
+  tags:
+    - consul
+  roles:
+    - consul
+- name: deploy postgres cluster
+  hosts: post_cluster
+  become: true
+  tags:
+    - dbcr 
+  roles:
+    - database
+    - etcd_cluster
+    - patroni
+- name: haproxy
+  hosts: haproxy_postgres
+  become: true
+  tags:
+    - haproxy
+  roles:
+    - install_haproxy
+- name: create glusterfs-cluster
+  hosts: data
+  become: true
+  tags:
+    - gluster
+  roles:
+    - gluster
+- name: config glusterfs-cluster
+  hosts: gluster1
+  become: true
+  tags:
+    - config_gluster
+  roles:
+    - config_gluster
+- name: install wiki_js
+  hosts: backend
+  become: true
+  tags:
+    - wiki
+  roles:
+    - install_wiki
+- name: create haproxy-front
+  hosts: frontend
+  become: true
+  tags: 
+    - haproxy_front
+  roles:
+    - haproxy_front
+- name: install fluent-bit
+  hosts: all
+  become: true
+  tags:
+    - fluent-bit
+  roles:
+    - fluent-bit
+- name: install grafana
+  hosts: monitoring
+  become: true
+  tags:
+    - grafana
+  roles:
+    - grafana
+
+...

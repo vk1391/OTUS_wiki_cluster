@@ -1,0 +1,6 @@
+gluster_name: gluster2
+role: backup
+prio: 99
+hostname: gluster2.otus.test
+gluster_ip: 192.168.56.200
+log_path: /var/log/messages

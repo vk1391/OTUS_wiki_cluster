@@ -1,0 +1,23 @@
+- name: change etcd cluster_config
+  copy:
+    content: |
+      ETCD_NAME="{{ node_name }}"
+      ETCD_LISTEN_CLIENT_URLS="http://0.0.0.0:2379"
+      ETCD_ADVERTISE_CLIENT_URLS="http://{{node_ip }}:2379"
+      ETCD_LISTEN_PEER_URLS="http://0.0.0.0:2380"
+      ETCD_INITIAL_ADVERTISE_PEER_URLS="http://{{ node_ip }}:2380"
+      ETCD_INITIAL_CLUSTER_TOKEN="TestCluster"
+      ETCD_INITIAL_CLUSTER="etcd1=http://192.168.56.205:2380,etcd2=http://192.168.56.206:2380,etcd3=http://192.168.56.207:2380"
+      ETCD_INITIAL_CLUSTER_STATE="new"
+      ETCD_DATA_DIR="/var/lib/etcd"
+      ETCD_ELECTION_TIMEOUT="5000"
+      ETCD_HEARTBEAT_INTERVAL="1000"
+    dest: /etc/etcd/etcd.conf
+    owner: root
+    group: root
+    mode: 0644
+- name: etcd started
+  systemd:
+    name: etcd
+    state: started
+    enabled: true

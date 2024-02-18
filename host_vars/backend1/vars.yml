@@ -1,0 +1,6 @@
+---
+wiki_db: wiki
+backend_name: backend1
+hostname: backend1.otus.test
+backend_ip: 192.168.56.209
+log_path: /var/log/messages
