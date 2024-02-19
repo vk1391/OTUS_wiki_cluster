@@ -60,7 +60,7 @@
           server-template wiki 1-2 _wiki._tcp.service.consul resolvers consul    resolve-opts allow-dup-ip resolve-prefer ipv4 check
 
       resolvers consul
-          nameserver consul 192.168.56.202:8600
+          nameserver consul 192.168.56.254:8600
           accepted_payload_size 8192
           hold valid 5s
     dest: /etc/haproxy/haproxy.cfg

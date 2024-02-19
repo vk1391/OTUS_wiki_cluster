@@ -206,7 +206,37 @@
     - sudo tar -C /usr/local -xzf go*.linux-amd64.tar.gz
     - export PATH=$PATH:/usr/local/go/bin
     - git clone https://github.com/prometheus/consul_exporter.git
-    - make -C consul-exporter/
+- name: make exporter
+  command: make
+  args:
+    chdir: consul_exporter/
+  ignore_errors: true
 - name: start consul exporter
-  command: bash consul_exporter/consul_exporter --web.listen-address=:9107
+  command: bash consul_exporter --web.listen-address=:9107 &
+- name: install keepalived
+  yum:
+    name: keepalived
+    state: present
+- name: config keepalived
+  copy:
+    content: |
+      vrrp_instance VI_1 {
+      interface eth2
+      state {{ role }}
+      virtual_router_id 1
+      priority {{ prio }}
+      virtual_ipaddress {
+      192.168.56.254
+      }
+      authentication {
+      auth_type PASS
+      auth_pass secret_password
+      }
+      }
+    dest: /etc/keepalived/keepalived.conf
+- name: Enable and start keepalived
+  systemd:
+    name: keepalived
+    state: started
+    enabled: true
   

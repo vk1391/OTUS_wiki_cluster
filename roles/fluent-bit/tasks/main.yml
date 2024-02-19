@@ -103,4 +103,5 @@
   systemd:
     name: fluent-bit
     state: restarted
+    enabled: true
       
